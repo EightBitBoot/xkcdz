@@ -1,12 +1,9 @@
 import requests
 import json
+import io
 
-unformatted_file = open("xkcd.json", "rt")
-unformatted_content = "".join(unformatted_file.readlines())
-unformatted_file.close()
-
-unformatted_json = json.loads(unformatted_content)
-
-formatted_file = open("xkcd_formatted.json", "wt+")
-formatted_file.write(json.dumps(parsed_json, indent=4))
-formatted_file.close()
+with open("xkcd.json", "r+") as unformatted_file:
+    json_data = json.loads("".join(unformatted_file.readlines()))
+    unformatted_file.truncate(0)
+    unformatted_file.seek(0, io.SEEK_SET)
+    unformatted_file.write(json.dumps(json_data))
