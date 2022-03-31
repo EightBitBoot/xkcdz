@@ -1,0 +1,12 @@
+# IDE Files
+.vscode/
+
+# Comic Images
+xkcd_cache/comics
+
+# Python venv
+venv/
+
+# CPython Cache(s)
+**/__pycache__/
+

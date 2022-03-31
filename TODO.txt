@@ -1,0 +1,28 @@
+* Isolate libraries
+    - Better include system than create_library_links.sh (maybe pip)
+* Better readme
+* Finish cache_util/update_cache.py
+* Potentially switch to async http requests
+* Add multithreading support
+
+discord_api:
+    * Identify count logging 
+    * Rate limiting 
+    * Flush out all json object types
+    
+    (Longer Term)
+    * State caching
+    * Image fetching api (descriptors that get from server upon request?)
+    * Sharding
+
+json_objs:
+    * Type annotations in generated methods
+    * Type checking in generated __init__ methods
+        - Make optional?
+    * Recursive json_obj parsing
+    * Recursive json_obj serialization
+
+xkcd:
+    * Finish XKCDComic object
+    * Create get_current_comic function
+    * Create get_comic_by_num function
