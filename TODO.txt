@@ -6,7 +6,6 @@
 * Add multithreading support
 
 discord_api:
-    * Identify count logging 
     * Rate limiting 
     * Flush out all json object types
     

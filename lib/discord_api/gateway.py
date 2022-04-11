@@ -2,6 +2,8 @@ import zlib
 import platform
 import asyncio
 import time
+import json
+from threading import Lock
 
 import websockets
 
@@ -13,8 +15,12 @@ __all__ = [
 
 ZLIB_SUFFIX = b'\x00\x00\xff\xff'
 
-#TODO(Adin): Identify Counting
 #TODO(Adin): Rate limiting (120 messages / 60s)
+#TODO(Adin): Config System
+
+_identify_file_mutex = Lock()
+#TODO(Adin): Move this to config system
+IDENTIFY_FILE_NAME = "identifies.json"
 
 class DiscordGatewayClient:
     def __init__(self, url):
@@ -32,6 +38,39 @@ class DiscordGatewayClient:
 
     async def connect(self):
         self._websocket_client = await websockets.connect(self._url + "/?v=9&encoding=json&compress=zlib-stream")
+
+    def _update_identifies_file(self):
+        _identify_file_mutex.acquire()
+
+        with open(IDENTIFY_FILE_NAME, "a+t") as identify_file:
+            identify_file.seek(0, 0) # Whence 0 is SEEK_SET
+            identify_file_contents = "".join(identify_file.readlines())
+            # Number of identifies in the 24 hour period
+            identifies = 0
+            # Unix timestamp of the beginning of the 24 hour period
+            identify_time_period = int(time.time())
+
+            print(type(identify_file_contents))
+            print(identify_file_contents)
+
+            if len(identify_file_contents) > 0:
+                # File has content
+                identifies_parsed_json = json.loads(identify_file_contents)
+                now = int(time.time())
+                later = identifies_parsed_json["identify_time_period"] + 86400
+                print(now, later)
+                if int(time.time()) < identifies_parsed_json["identify_time_period"] + 86400:
+                    # 24 hour period hasn't elapsed
+                    identifies = identifies_parsed_json["identifies"]
+                    identify_time_period = identifies_parsed_json["identify_time_period"]
+
+            # Increment for the current handshake's identify packet
+            identifies += 1
+
+            identify_file.truncate(0)
+            identify_file.write(json.dumps({"identifies": identifies, "identify_time_period": identify_time_period}, indent=4))
+
+        _identify_file_mutex.release()
 
     async def handshake(self, bot_token, bot_name, intents, os=None):
         hello_payload = await self.recv()
@@ -58,6 +97,10 @@ class DiscordGatewayClient:
         print("Sending identify payload")
         identify_payload = GatewayPayload(2, identify_data, None, None)
         await self.send(identify_payload)
+
+        # handshake() is only run once per instance so a function
+        # this meaty in the middle of handshaking should be ok
+        self._update_identifies_file()
 
         ready_payload = await self.recv()
         if ready_payload.t.lower() != "ready":
