@@ -4,10 +4,13 @@ import asyncio
 import time
 import json
 from threading import Lock
+import os
+from datetime import datetime
 
 import websockets
 
 from .types import GatewayPayload
+from .exception import GatewayException
 
 __all__ = [
     "DiscordGatewayClient"
@@ -19,8 +22,12 @@ ZLIB_SUFFIX = b'\x00\x00\xff\xff'
 #TODO(Adin): Config System
 
 _identify_file_mutex = Lock()
-#TODO(Adin): Move this to config system
+#TODO(Adin): Move these to config system
 IDENTIFY_FILE_NAME = "identifies.json"
+IDENTIFY_MAX = 1000
+
+# Number of seconds in 24 hours
+TF_HOUR_SECONDS = 86400
 
 class DiscordGatewayClient:
     def __init__(self, url):
@@ -39,36 +46,43 @@ class DiscordGatewayClient:
     async def connect(self):
         self._websocket_client = await websockets.connect(self._url + "/?v=9&encoding=json&compress=zlib-stream")
 
-    def _update_identifies_file(self):
+    def _load_identifies_from_file(self):
         _identify_file_mutex.acquire()
 
-        with open(IDENTIFY_FILE_NAME, "a+t") as identify_file:
-            identify_file.seek(0, 0) # Whence 0 is SEEK_SET
-            identify_file_contents = "".join(identify_file.readlines())
+        identifies = 0
+        identify_time_period = time.time()
+
+        if os.path.exists(IDENTIFY_FILE_NAME):
+            identify_file_contents = None
+
+            with open(IDENTIFY_FILE_NAME, "rt") as identify_file:
+                identify_file_contents = "".join(identify_file.readlines())
+
+            identifies_parsed_json = json.loads(identify_file_contents)
+
+            identifies = identifies_parsed_json["identifies"]
+            identify_time_period = identifies_parsed_json["identify_time_period"]
+
+        _identify_file_mutex.release()
+
+        return (identifies, identify_time_period)
+
+    def _update_identifies_file(self, identifies, old_identify_time_period):
+        _identify_file_mutex.acquire()
+
+        with open(IDENTIFY_FILE_NAME, "w+t") as identify_file:
             # Number of identifies in the 24 hour period
-            identifies = 0
+            res_identifies = 1
             # Unix timestamp of the beginning of the 24 hour period
-            identify_time_period = int(time.time())
+            res_identify_time_period = int(time.time())
 
-            print(type(identify_file_contents))
-            print(identify_file_contents)
-
-            if len(identify_file_contents) > 0:
-                # File has content
-                identifies_parsed_json = json.loads(identify_file_contents)
-                now = int(time.time())
-                later = identifies_parsed_json["identify_time_period"] + 86400
-                print(now, later)
-                if int(time.time()) < identifies_parsed_json["identify_time_period"] + 86400:
-                    # 24 hour period hasn't elapsed
-                    identifies = identifies_parsed_json["identifies"]
-                    identify_time_period = identifies_parsed_json["identify_time_period"]
-
-            # Increment for the current handshake's identify packet
-            identifies += 1
+            if int(time.time()) < old_identify_time_period + TF_HOUR_SECONDS:
+                # 24 hour period hasn't elapsed
+                res_identifies = identifies
+                res_identify_time_period = old_identify_time_period
 
             identify_file.truncate(0)
-            identify_file.write(json.dumps({"identifies": identifies, "identify_time_period": identify_time_period}, indent=4))
+            identify_file.write(json.dumps({"identifies": res_identifies, "identify_time_period": res_identify_time_period}, indent=4))
 
         _identify_file_mutex.release()
 
@@ -94,13 +108,24 @@ class DiscordGatewayClient:
             "intents": intents
         }
 
+        identifies, old_identify_time_period = self._load_identifies_from_file()
+
+        if identifies >= IDENTIFY_MAX:
+            raise GatewayException("Max identifies already sent in 24 hour period [{}, {}]".format(
+                datetime.fromtimestamp(old_identify_time_period),
+                datetime.fromtimestamp(old_identify_time_period + TF_HOUR_SECONDS - 1)))
+
         print("Sending identify payload")
         identify_payload = GatewayPayload(2, identify_data, None, None)
         await self.send(identify_payload)
 
+        identifies += 1
+
+        print("Identifies:", identifies)
+
         # handshake() is only run once per instance so a function
         # this meaty in the middle of handshaking should be ok
-        self._update_identifies_file()
+        self._update_identifies_file(identifies, old_identify_time_period)
 
         ready_payload = await self.recv()
         if ready_payload.t.lower() != "ready":
